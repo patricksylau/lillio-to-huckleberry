@@ -5,6 +5,7 @@ import time
 import imaplib
 import email
 import datetime
+import email.utils
 from email.header import decode_header
 
 # Install library automatically
@@ -53,7 +54,7 @@ def apply_patches():
                 setattr(module, 'time', FakeTimeModule)
 
 # ==========================================
-# 📧 GMAIL FETCHER (Robust)
+# 📧 GMAIL FETCHER (Robust Date & Sender)
 # ==========================================
 def fetch_unread_report():
     print(f"📧 Connecting to Gmail ({GMAIL_USER})...")
@@ -61,26 +62,26 @@ def fetch_unread_report():
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(GMAIL_USER, GMAIL_APP_PASSWORD)
         
-        # 1. Select Folder (Try All Mail, fallback to Inbox)
+        # 1. Select Folder
         try:
             mail.select('"[Gmail]/All Mail"')
         except Exception:
             print("⚠️ Could not find 'All Mail'. Checking Inbox.")
             mail.select("inbox")
         
-        # 2. BROAD SEARCH: Find ANY Unread email with "Saanvi" in subject
+        # 2. BROAD SEARCH
         print(f"🔍 Searching for UNREAD emails with 'Saanvi' in subject...")
         status, messages = mail.search(None, '(UNSEEN SUBJECT "Saanvi")')
         
         if not messages or not messages[0]:
             print("❌ No unread 'Saanvi' emails found.")
-            return None, None
+            return None, None, None
             
-        # 3. FILTER LOOP (Check Sender)
+        # 3. FILTER LOOP
         email_ids = messages[0].split()
         
         for e_id in reversed(email_ids):
-            # Fetch Header Only
+            # Fetch Header
             _, msg_header = mail.fetch(e_id, '(RFC822.HEADER)')
             header_msg = email.message_from_bytes(msg_header[0][1])
             sender = header_msg.get("From", "").lower()
@@ -93,6 +94,13 @@ def fetch_unread_report():
                 # Fetch Body
                 _, msg_data = mail.fetch(e_id, "(RFC822)")
                 msg = email.message_from_bytes(msg_data[0][1])
+                
+                # Extract Date from Email Header (The Truth)
+                email_date_str = msg.get("Date")
+                parsed_date = email.utils.parsedate_to_datetime(email_date_str)
+                # Convert to YYYY-MM-DD string
+                clean_date = parsed_date.strftime("%Y-%m-%d")
+                print(f"   📅 Email Timestamp: {clean_date}")
                 
                 # Decode Subject
                 subject, encoding = decode_header(msg["Subject"])[0]
@@ -109,35 +117,27 @@ def fetch_unread_report():
                 else:
                     body = msg.get_payload(decode=True).decode()
                 
-                return body, subject
+                return body, subject, clean_date
             else:
                 print("   ⚠️ Skipping (Sender not allowed)")
         
         print("❌ No emails found from valid senders.")
-        return None, None
+        return None, None, None
 
     except Exception as e:
         print(f"❌ Gmail Error: {e}")
-        return None, None
+        return None, None, None
 
 # ==========================================
 # 🚀 MAIN PROCESS
 # ==========================================
 def process_log():
-    raw_content, subject = fetch_unread_report()
+    # Now getting Date directly from the email metadata
+    raw_content, subject, email_date = fetch_unread_report()
     if not raw_content: return
 
-    # Extract Date
-    match = re.search(r"Report - \w+, (\w+ \d+)", raw_content)
-    if match:
-        date_part = match.group(1)
-        current_year = datetime.datetime.now().year
-        FIXED_DATE = datetime.datetime.strptime(f"{current_year} {date_part}", "%Y %b %d").strftime("%Y-%m-%d")
-        print(f"📅 Report Date Detected: {FIXED_DATE}")
-    else:
-        print("⚠️ Could not detect date. Using Today.")
-        FIXED_DATE = datetime.datetime.now().strftime("%Y-%m-%d")
-
+    # Use the email's date as the Source of Truth
+    FIXED_DATE = email_date
     print(f"🚀 Starting Sync for {FIXED_DATE}...")
     
     apply_patches()
