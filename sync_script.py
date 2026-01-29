@@ -7,7 +7,6 @@ import email
 import datetime
 from email.header import decode_header
 
-# Install library automatically if missing (Simulates pip install)
 try:
     from huckleberry_api import HuckleberryAPI
 except ImportError:
@@ -16,23 +15,19 @@ except ImportError:
     from huckleberry_api import HuckleberryAPI
 
 # ==========================================
-# 🔐 CREDENTIALS (Loaded from GitHub Secrets)
+# 🔐 CREDENTIALS
 # ==========================================
 HUCKLE_EMAIL = os.environ["HUCKLE_EMAIL"]
 HUCKLE_PASS = os.environ["HUCKLE_PASS"]
 GMAIL_USER = os.environ["GMAIL_USER"]
 GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASS"]
-
-# CONFIGURATION
 TIMEZONE = "America/Toronto"
-SEARCH_SUBJECT = "Saanvi's Report"
 
 # ==========================================
-# 🔧 THE TIME MACHINE (Search & Destroy)
+# 🔧 THE TIME MACHINE
 # ==========================================
 class TimeMachine:
     current_dt = datetime.datetime.now()
-
     @staticmethod
     def set_time(date_str, time_str):
         dt = datetime.datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %I:%M%p")
@@ -57,7 +52,7 @@ def apply_patches():
                 setattr(module, 'time', FakeTimeModule)
 
 # ==========================================
-# 📧 DEBUG GMAIL FETCHER
+# 📧 SECURE GMAIL FETCHER
 # ==========================================
 def fetch_unread_report():
     print(f"📧 Connecting to Gmail ({GMAIL_USER})...")
@@ -65,30 +60,28 @@ def fetch_unread_report():
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(GMAIL_USER, GMAIL_APP_PASSWORD)
         
-        # 1. Try to select 'All Mail'. If it fails, fallback to Inbox.
+        # 1. Select 'All Mail' (Handles Archived emails)
         try:
             mail.select('"[Gmail]/All Mail"')
-            print("📂 Selected '[Gmail]/All Mail'")
         except:
-            print("⚠️ Could not find 'All Mail'. Falling back to 'Inbox'.")
+            print("⚠️ Could not find 'All Mail'. Checking Inbox.")
             mail.select("inbox")
         
-        # 2. BROAD SEARCH: Just look for "Saanvi" (Avoids apostrophe issues)
-        # We also look for UNSEEN (Unread).
-        print(f"🔍 Searching for UNREAD emails with 'Saanvi' in subject...")
-        status, messages = mail.search(None, '(UNSEEN SUBJECT "Saanvi")')
+        # 2. STRICT SEARCH: Unread + From lillio.com + Subject "Saanvi"
+        # This prevents picking up random emails.
+        print(f"🔍 Searching for UNREAD emails from 'lillio.com' with 'Saanvi' in subject...")
+        status, messages = mail.search(None, '(UNSEEN FROM "lillio.com" SUBJECT "Saanvi")')
         
         if not messages[0]:
-            print("❌ No unread 'Saanvi' emails found.")
-            print("   (Double check: Is the email actually marked Unread?)")
+            print("❌ No matching unread emails found.")
             
-            # DEBUG: Let's see if we can find it even if it IS Read, just to prove it exists.
-            print("🕵️ DEBUG SEARCH: Looking for READ emails...")
-            status, debug_msgs = mail.search(None, '(SUBJECT "Saanvi")')
+            # DEBUG: Did we miss it because it was already read?
+            status, debug_msgs = mail.search(None, '(FROM "lillio.com" SUBJECT "Saanvi")')
             if debug_msgs[0]:
-                print(f"   💡 Found {len(debug_msgs[0].split())} READ emails. The robot only looks for UNREAD ones.")
+                print(f"   💡 Found {len(debug_msgs[0].split())} matching emails, but they are already READ.")
+                print("   👉 Action: Mark the email as UNREAD in Gmail and try again.")
             else:
-                print("   ❌ Zero emails found. The subject might be different.")
+                print("   ❌ Zero emails found from Lillio. Check the sender domain.")
             return None, None
             
         # 3. PROCESS THE LATEST ONE
@@ -115,16 +108,15 @@ def fetch_unread_report():
                     body = msg.get_payload(decode=True).decode()
                 
                 return body, subject
-                
     except Exception as e:
         print(f"❌ Gmail Error: {e}")
         return None, None
-        
+
 # ==========================================
 # 🚀 MAIN PROCESS
 # ==========================================
 def process_log():
-    raw_content, subject = fetch_latest_report()
+    raw_content, subject = fetch_unread_report()
     if not raw_content: return
 
     # Extract Date
@@ -140,7 +132,6 @@ def process_log():
 
     print(f"🚀 Starting Sync for {FIXED_DATE}...")
     
-    # Patch & Login
     apply_patches()
     try:
         client = HuckleberryAPI(email=HUCKLE_EMAIL, password=HUCKLE_PASS, timezone=TIMEZONE)
@@ -177,12 +168,6 @@ def process_log():
             client.log_diaper(child_id, dtype)
             print("✅")
         except Exception as e: print(f"⚠️ {e}")
-
-    # C. BOTTLE REMINDER (Prints to logs only)
-    print("\n📝 MANUAL BOTTLES REMINDER:")
-    milk_lines = re.findall(r'(\d{1,2}:\d{2}[ap]m) - (\d+)\s*oz', raw_content)
-    for time_str, amount in milk_lines:
-        print(f"   [ ] {amount} oz Milk at {time_str}")
 
 if __name__ == "__main__":
     process_log()
