@@ -64,7 +64,7 @@ def fetch_latest_report():
     try:
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(GMAIL_USER, GMAIL_APP_PASSWORD)
-        mail.select("inbox")
+        mail.select('"Lillio Daily Reports"')
         
         # Search for email from Today (or just latest subject)
         status, messages = mail.search(None, f'(SUBJECT "{SEARCH_SUBJECT}")')
