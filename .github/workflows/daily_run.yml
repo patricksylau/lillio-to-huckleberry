@@ -2,9 +2,9 @@ name: Huckleberry Daily Sync
 
 on:
   schedule:
-    # 23:00 UTC = 6:00 PM EST (Standard Time) / 7:00 PM EDT (Daylight Savings)
-    - cron: '0 23 * * *'
-  # This line lets you click "Run now" manually for testing
+    # Checks every 30 mins at hours 21, 22, 23, and 00 UTC
+    # (4:00 PM, 4:30 PM, ... until 7:30 PM EST)
+    - cron: '*/30 21-23,0 * * *'
   workflow_dispatch:
 
 jobs:
