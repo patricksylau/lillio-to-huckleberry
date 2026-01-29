@@ -57,22 +57,41 @@ def apply_patches():
                 setattr(module, 'time', FakeTimeModule)
 
 # ==========================================
-# 📧 GMAIL FETCHER
+# 📧 DEBUG GMAIL FETCHER
 # ==========================================
-def fetch_latest_report():
-    print(f"📧 Connecting to Gmail as {GMAIL_USER}...")
+def fetch_unread_report():
+    print(f"📧 Connecting to Gmail ({GMAIL_USER})...")
     try:
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(GMAIL_USER, GMAIL_APP_PASSWORD)
-        mail.select('"Lillio Daily Reports"')
         
-        # Search for email from Today (or just latest subject)
-        status, messages = mail.search(None, f'(SUBJECT "{SEARCH_SUBJECT}")')
+        # 1. Try to select 'All Mail'. If it fails, fallback to Inbox.
+        try:
+            mail.select('"[Gmail]/All Mail"')
+            print("📂 Selected '[Gmail]/All Mail'")
+        except:
+            print("⚠️ Could not find 'All Mail'. Falling back to 'Inbox'.")
+            mail.select("inbox")
+        
+        # 2. BROAD SEARCH: Just look for "Saanvi" (Avoids apostrophe issues)
+        # We also look for UNSEEN (Unread).
+        print(f"🔍 Searching for UNREAD emails with 'Saanvi' in subject...")
+        status, messages = mail.search(None, '(UNSEEN SUBJECT "Saanvi")')
         
         if not messages[0]:
-            print("❌ No emails found with that subject.")
+            print("❌ No unread 'Saanvi' emails found.")
+            print("   (Double check: Is the email actually marked Unread?)")
+            
+            # DEBUG: Let's see if we can find it even if it IS Read, just to prove it exists.
+            print("🕵️ DEBUG SEARCH: Looking for READ emails...")
+            status, debug_msgs = mail.search(None, '(SUBJECT "Saanvi")')
+            if debug_msgs[0]:
+                print(f"   💡 Found {len(debug_msgs[0].split())} READ emails. The robot only looks for UNREAD ones.")
+            else:
+                print("   ❌ Zero emails found. The subject might be different.")
             return None, None
             
+        # 3. PROCESS THE LATEST ONE
         latest_id = messages[0].split()[-1]
         status, msg_data = mail.fetch(latest_id, "(RFC822)")
         
@@ -83,6 +102,9 @@ def fetch_latest_report():
                 if isinstance(subject, bytes):
                     subject = subject.decode(encoding if encoding else "utf-8")
                 
+                print(f"✅ Found Email: '{subject}'")
+                
+                # Extract Body
                 body = ""
                 if msg.is_multipart():
                     for part in msg.walk():
@@ -92,12 +114,12 @@ def fetch_latest_report():
                 else:
                     body = msg.get_payload(decode=True).decode()
                 
-                print(f"✅ Found Email: {subject}")
                 return body, subject
+                
     except Exception as e:
         print(f"❌ Gmail Error: {e}")
         return None, None
-
+        
 # ==========================================
 # 🚀 MAIN PROCESS
 # ==========================================
