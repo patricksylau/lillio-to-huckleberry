@@ -1,0 +1,33 @@
+name: Huckleberry Daily Sync
+
+on:
+  schedule:
+    # 23:00 UTC = 6:00 PM EST (Standard Time) / 7:00 PM EDT (Daylight Savings)
+    - cron: '0 23 * * *'
+  # This line lets you click "Run now" manually for testing
+  workflow_dispatch:
+
+jobs:
+  run-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install beautifulsoup4 huckleberry-api
+
+      - name: Run Script
+        env:
+          HUCKLE_EMAIL: ${{ secrets.HUCKLE_EMAIL }}
+          HUCKLE_PASS: ${{ secrets.HUCKLE_PASS }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASS: ${{ secrets.GMAIL_APP_PASS }}
+        run: python sync_script.py
