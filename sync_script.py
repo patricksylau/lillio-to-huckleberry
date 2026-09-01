@@ -1,18 +1,21 @@
+import asyncio
 import os
 import re
 import sys
-import time
 import imaplib
 import email
 import datetime
 import email.utils
 from email.header import decode_header
+from zoneinfo import ZoneInfo
 
 try:
+    import aiohttp
     from huckleberry_api import HuckleberryAPI
 except ImportError:
     import subprocess
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "beautifulsoup4", "huckleberry-api"])
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "huckleberry-api"])
+    import aiohttp
     from huckleberry_api import HuckleberryAPI
 
 # ==========================================
@@ -23,34 +26,6 @@ HUCKLE_PASS = os.environ["HUCKLE_PASS"]
 GMAIL_USER = os.environ["GMAIL_USER"]
 GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASS"]
 TIMEZONE = "America/Toronto"
-
-# ==========================================
-# 🔧 THE TIME MACHINE
-# ==========================================
-class TimeMachine:
-    current_dt = datetime.datetime.now()
-    @staticmethod
-    def set_time(date_str, time_str):
-        dt = datetime.datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %I:%M%p")
-        TimeMachine.current_dt = dt
-
-class FakeDatetime(datetime.datetime):
-    @classmethod
-    def now(cls, tz=None): return TimeMachine.current_dt
-    @classmethod
-    def utcnow(cls): return TimeMachine.current_dt
-
-def apply_patches():
-    for name, module in list(sys.modules.items()):
-        if "huckleberry" in name:
-            if hasattr(module, 'datetime'): setattr(module, 'datetime', FakeDatetime)
-            if hasattr(module, 'time'):
-                class FakeTimeModule:
-                    @staticmethod
-                    def time(): return TimeMachine.current_dt.timestamp()
-                    @staticmethod
-                    def sleep(s): time.sleep(s)
-                setattr(module, 'time', FakeTimeModule)
 
 # ==========================================
 # 📧 GMAIL FETCHER (Sender-First Search)
@@ -122,35 +97,54 @@ def fetch_unread_report():
 # ==========================================
 # 🚀 MAIN PROCESS
 # ==========================================
-def process_log():
-    raw_content, subject, email_date = fetch_unread_report()
-    if not raw_content: return
+def event_datetime(date_str, time_str):
+    return datetime.datetime.strptime(
+        f"{date_str} {time_str}", "%Y-%m-%d %I:%M%p"
+    ).replace(tzinfo=ZoneInfo(TIMEZONE))
 
-    # USE EMAIL DATE AS TRUTH
-    FIXED_DATE = email_date
-    print(f"🚀 Starting Sync for {FIXED_DATE}...")
-    
-    apply_patches()
+
+async def process_log():
+    raw_content, subject, email_date = fetch_unread_report()
+    if not raw_content:
+        return
+
+    fixed_date = email_date
+    print(f"🚀 Starting Sync for {fixed_date}...")
+
     try:
-        client = HuckleberryAPI(email=HUCKLE_EMAIL, password=HUCKLE_PASS, timezone=TIMEZONE)
-        children = client.get_children()
-        if not children: return
-        child_id = children[0]['uid']
-        print(f"✅ Connected for: {children[0].get('name', 'Baby')}")
+        async with aiohttp.ClientSession() as websession:
+            client = HuckleberryAPI(
+                email=HUCKLE_EMAIL,
+                password=HUCKLE_PASS,
+                timezone=TIMEZONE,
+                websession=websession,
+            )
+            await client.authenticate()
+            user = await client.get_user()
+            if not user or not user.childList:
+                print("❌ No children found in the Huckleberry account")
+                return
+
+            child_id = user.childList[0].cid
+            print(f"✅ Connected for child ID: {child_id}")
+
+            await sync_events(client, child_id, raw_content, fixed_date)
     except Exception as e:
         print(f"❌ Login Failed: {e}")
-        return
+
+
+async def sync_events(client, child_id, raw_content, fixed_date):
 
     # A. NAPS
     naps = re.findall(r'(\d{1,2}:\d{2}[ap]m)\s*-\s*(\d{1,2}:\d{2}[ap]m)', raw_content)
     for start_str, end_str in naps:
         print(f"   💤 Nap: {start_str} - {end_str}...", end=" ")
         try:
-            TimeMachine.set_time(FIXED_DATE, start_str)
-            client.start_sleep(child_id)
-            time.sleep(1)
-            TimeMachine.set_time(FIXED_DATE, end_str)
-            client.complete_sleep(child_id)
+            await client.log_sleep(
+                child_id,
+                start_time=event_datetime(fixed_date, start_str),
+                end_time=event_datetime(fixed_date, end_str),
+            )
             print("✅")
         except Exception as e: print(f"⚠️ {e}")
 
@@ -162,10 +156,13 @@ def process_log():
         else: dtype = "dry"
         print(f"   🧷 Diaper ({dtype}): {time_str}...", end=" ")
         try:
-            TimeMachine.set_time(FIXED_DATE, time_str)
-            client.log_diaper(child_id, dtype)
+            await client.log_diaper(
+                child_id,
+                start_time=event_datetime(fixed_date, time_str),
+                mode=dtype,
+            )
             print("✅")
         except Exception as e: print(f"⚠️ {e}")
 
 if __name__ == "__main__":
-    process_log()
+    asyncio.run(process_log())
