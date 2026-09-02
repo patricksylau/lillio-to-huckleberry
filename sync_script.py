@@ -184,7 +184,6 @@ async def sync_events(client, child_id, raw_content, fixed_date):
                 amount=float(amount),
                 bottle_type=bottle_type,
                 units=units.lower(),
-                notes="[Daycare]",
             )
             print("✅")
         except Exception as e: print(f"⚠️ {e}")
