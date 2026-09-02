@@ -12,11 +12,13 @@ from zoneinfo import ZoneInfo
 try:
     import aiohttp
     from huckleberry_api import HuckleberryAPI
+    from huckleberry_api.firebase_types import FirebaseSleepDetails
 except ImportError:
     import subprocess
     subprocess.check_call([sys.executable, "-m", "pip", "install", "huckleberry-api"])
     import aiohttp
     from huckleberry_api import HuckleberryAPI
+    from huckleberry_api.firebase_types import FirebaseSleepDetails
 
 # ==========================================
 # 🔐 CREDENTIALS
@@ -144,6 +146,7 @@ async def sync_events(client, child_id, raw_content, fixed_date):
                 child_id,
                 start_time=event_datetime(fixed_date, start_str),
                 end_time=event_datetime(fixed_date, end_str),
+                details=FirebaseSleepDetails(notes="[Daycare]"),
             )
             print("✅")
         except Exception as e: print(f"⚠️ {e}")
@@ -160,6 +163,28 @@ async def sync_events(client, child_id, raw_content, fixed_date):
                 child_id,
                 start_time=event_datetime(fixed_date, time_str),
                 mode=dtype,
+                notes="[Daycare]",
+            )
+            print("✅")
+        except Exception as e: print(f"⚠️ {e}")
+
+    # C. BOTTLES
+    bottle_lines = re.findall(
+        r"(\d{1,2}:\d{2}[ap]m)\s*-\s*(\d+(?:\.\d+)?)\s*(ml|oz)\s*-\s*([^\r\n]+)",
+        raw_content,
+        flags=re.IGNORECASE,
+    )
+    for time_str, amount, units, details in bottle_lines:
+        bottle_type = details.strip(" -:") or "Formula"
+        print(f"   🍼 Bottle ({amount} {units} {bottle_type}): {time_str}...", end=" ")
+        try:
+            await client.log_bottle(
+                child_id,
+                start_time=event_datetime(fixed_date, time_str),
+                amount=float(amount),
+                bottle_type=bottle_type,
+                units=units.lower(),
+                notes="[Daycare]",
             )
             print("✅")
         except Exception as e: print(f"⚠️ {e}")
